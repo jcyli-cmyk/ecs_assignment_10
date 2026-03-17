@@ -31,11 +31,8 @@ def load_hf_token() -> str | None:
 def default_memory() -> dict:
     return {
         "name": None,
-        "preferred_language": None,
         "communication_style": [],
         "interests": [],
-        "favorite_topics": [],
-        "other_preferences": [],
     }
 
 
@@ -89,11 +86,11 @@ def merge_memory(existing: dict, extracted: dict) -> dict:
     merged = sanitize_extracted_memory(existing)
     incoming = sanitize_extracted_memory(extracted)
 
-    for key in ("name", "preferred_language"):
+    for key in ("name",):
         if incoming[key]:
             merged[key] = incoming[key]
 
-    for key in ("communication_style", "interests", "favorite_topics", "other_preferences"):
+    for key in ("communication_style", "interests"):
         seen = {item.lower(): item for item in merged[key]}
         for item in incoming[key]:
             lowered = item.lower()
@@ -109,11 +106,8 @@ def build_memory_system_message(memory: dict) -> dict | None:
     if not any(
         [
             memory["name"],
-            memory["preferred_language"],
             memory["communication_style"],
             memory["interests"],
-            memory["favorite_topics"],
-            memory["other_preferences"],
         ]
     ):
         return None
@@ -122,26 +116,19 @@ def build_memory_system_message(memory: dict) -> dict | None:
         "You are chatting with a returning user.",
         "The stored user memory below is authoritative for personalization.",
         "Use it proactively to make responses feel tailored, natural, and consistent across conversations.",
-        "If the user asks about their name, preferred language, interests, favorite topics, or communication preferences, answer from this memory when available.",
-        "When giving examples, explanations, recommendations, or follow-up questions, prefer details that connect to the stored interests and preferences.",
+        "If the user asks about their name, interests, or communication preferences, answer from this memory when available.",
+        "When giving examples, explanations, recommendations, or follow-up questions, prefer details that connect to the stored interests and communication style.",
         "If a communication style is stored, match that style in your response.",
-        "If a preferred language is stored, respond in that language unless the user clearly asks for a different one.",
         "If a name is stored, use it naturally when appropriate, especially in directly personal replies.",
         "Do not invent personal facts that are not present in this memory.",
         "Stored user memory:",
     ]
     if memory["name"]:
         memory_lines.append(f"- Name: {memory['name']}")
-    if memory["preferred_language"]:
-        memory_lines.append(f"- Preferred language: {memory['preferred_language']}")
     if memory["communication_style"]:
         memory_lines.append(f"- Communication style: {', '.join(memory['communication_style'])}")
     if memory["interests"]:
         memory_lines.append(f"- Interests: {', '.join(memory['interests'])}")
-    if memory["favorite_topics"]:
-        memory_lines.append(f"- Favorite topics: {', '.join(memory['favorite_topics'])}")
-    if memory["other_preferences"]:
-        memory_lines.append(f"- Other preferences: {', '.join(memory['other_preferences'])}")
 
     return {"role": "system", "content": "\n".join(memory_lines)}
 
@@ -161,21 +148,9 @@ def sanitize_extracted_memory(memory: dict) -> dict:
         "not provided",
         "not specified",
     }
-    invalid_language_values = {
-        "user",
-        "the user",
-        "unknown",
-        "none",
-        "n/a",
-        "not provided",
-        "not specified",
-    }
 
     if cleaned["name"] and cleaned["name"].strip().lower() in invalid_name_values:
         cleaned["name"] = None
-
-    if cleaned["preferred_language"] and cleaned["preferred_language"].strip().lower() in invalid_language_values:
-        cleaned["preferred_language"] = None
 
     return cleaned
 
@@ -252,18 +227,6 @@ def extract_rule_based_memory(user_message: str) -> dict:
     if direct_name:
         extracted["name"] = direct_name
 
-    language_patterns = [
-        r"\bi prefer ([A-Za-z]+)\b",
-        r"\bplease respond in ([A-Za-z]+)\b",
-        r"\banswer in ([A-Za-z]+)\b",
-        r"\bi speak ([A-Za-z]+)\b",
-    ]
-    for pattern in language_patterns:
-        match = re.search(pattern, user_message, flags=re.IGNORECASE)
-        if match:
-            extracted["preferred_language"] = match.group(1).strip().title()
-            break
-
     interest_patterns = [
         r"\bi like (.+)",
         r"\bi love (.+)",
@@ -275,17 +238,6 @@ def extract_rule_based_memory(user_message: str) -> dict:
         match = re.search(pattern, user_message, flags=re.IGNORECASE)
         if match:
             extracted["interests"] = split_preference_items(first_sentence_fragment(match.group(1)))
-            break
-
-    favorite_topic_patterns = [
-        r"\bmy favorite topics are (.+)",
-        r"\bmy favorite topic is (.+)",
-        r"\bi like talking about (.+)",
-    ]
-    for pattern in favorite_topic_patterns:
-        match = re.search(pattern, user_message, flags=re.IGNORECASE)
-        if match:
-            extracted["favorite_topics"] = split_preference_items(first_sentence_fragment(match.group(1)))
             break
 
     if "concise" in lowered_message:
@@ -300,17 +252,6 @@ def extract_rule_based_memory(user_message: str) -> dict:
         extracted["communication_style"].append("formal")
     if "casual" in lowered_message:
         extracted["communication_style"].append("casual")
-
-    preference_patterns = [
-        r"\bi prefer (.+)",
-        r"\bplease use (.+)",
-        r"\bi want (.+)",
-    ]
-    for pattern in preference_patterns:
-        match = re.search(pattern, user_message, flags=re.IGNORECASE)
-        if match:
-            extracted["other_preferences"].extend(split_preference_items(first_sentence_fragment(match.group(1))))
-            break
 
     return sanitize_extracted_memory(extracted)
 
@@ -370,11 +311,11 @@ def extract_memory(hf_token: str, user_message: str) -> dict:
     extraction_prompt = (
         "Extract persistent user memory from this message. "
         "Return JSON only, with no markdown, explanation, or surrounding text. "
-        "Capture only facts the user explicitly states about themself, such as their name, preferred language, interests, favorite topics, or communication preferences. "
+        "Capture only facts the user explicitly states about themself, such as their name, interests, or communication preferences. "
         "Do not guess or infer missing facts. "
         "Never use placeholders like 'user', 'the user', 'unknown', or 'not provided' as values. "
         "Return only valid JSON using exactly these keys: "
-        "name, preferred_language, communication_style, interests, favorite_topics, other_preferences. "
+        "name, communication_style, interests. "
         "Use null for missing string values and [] for missing list values. "
         "If the message contains no stable personal facts or preferences, return {}.\n\n"
         f"User message: {user_message}"
@@ -663,11 +604,8 @@ if prompt and active_chat is not None:
                     if any(
                         [
                             fallback_memory["name"],
-                            fallback_memory["preferred_language"],
                             fallback_memory["communication_style"],
                             fallback_memory["interests"],
-                            fallback_memory["favorite_topics"],
-                            fallback_memory["other_preferences"],
                         ]
                     ):
                         merged_memory = merge_memory(memory, fallback_memory)
