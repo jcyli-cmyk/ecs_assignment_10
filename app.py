@@ -82,6 +82,35 @@ def save_memory(memory: dict) -> None:
     MEMORY_FILE.write_text(json.dumps(sanitize_extracted_memory(memory), indent=2), encoding="utf-8")
 
 
+COMMUNICATION_STYLE_CONFLICTS = {
+    "brief": {"detailed"},
+    "casual": {"formal"},
+    "concise": {"detailed"},
+    "detailed": {"brief", "concise", "simple"},
+    "formal": {"casual"},
+    "simple": {"detailed"},
+}
+
+
+def resolve_communication_styles(styles: list[str]) -> list[str]:
+    resolved: list[str] = []
+
+    for style in styles:
+        normalized_style = style.strip().lower()
+        if not normalized_style:
+            continue
+
+        conflicts = COMMUNICATION_STYLE_CONFLICTS.get(normalized_style, set())
+        resolved = [
+            existing_style
+            for existing_style in resolved
+            if existing_style != normalized_style and existing_style not in conflicts
+        ]
+        resolved.append(normalized_style)
+
+    return resolved
+
+
 def merge_memory(existing: dict, extracted: dict) -> dict:
     merged = sanitize_extracted_memory(existing)
     incoming = sanitize_extracted_memory(extracted)
@@ -90,13 +119,16 @@ def merge_memory(existing: dict, extracted: dict) -> dict:
         if incoming[key]:
             merged[key] = incoming[key]
 
-    for key in ("communication_style", "interests"):
-        seen = {item.lower(): item for item in merged[key]}
-        for item in incoming[key]:
-            lowered = item.lower()
-            if lowered not in seen:
-                seen[lowered] = item
-        merged[key] = list(seen.values())
+    merged["communication_style"] = resolve_communication_styles(
+        merged["communication_style"] + incoming["communication_style"]
+    )
+
+    seen = {item.lower(): item for item in merged["interests"]}
+    for item in incoming["interests"]:
+        lowered = item.lower()
+        if lowered not in seen:
+            seen[lowered] = item
+    merged["interests"] = list(seen.values())
 
     return merged
 
@@ -155,6 +187,8 @@ def sanitize_extracted_memory(memory: dict) -> dict:
 
     if cleaned["name"] and cleaned["name"].strip().lower() in invalid_name_values:
         cleaned["name"] = None
+
+    cleaned["communication_style"] = resolve_communication_styles(cleaned["communication_style"])
 
     return cleaned
 
